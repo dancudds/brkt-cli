@@ -19,3 +19,10 @@ tcp/80, tcp/443 and udp/123 (NTP) on the Internet. A security group
 named ``InternetClientSG`` is created and is intended to be applied to
 instances within the private subnet that need Internet access.
 
+``vpc-dual-az-with-nat-and-vpn.json``: This cloudformation template is
+very similar to the aforementioned one but adds the aws site to site
+ipsec VPN product to the VPC and changes a few security group rules.
+Notably the configuration changes such that SSH is no longer allowed to
+the NAT instances, you may only SSH to instances over the site to site
+VPN. The site to site VPN may be configured with static routes or to use
+BGP.
