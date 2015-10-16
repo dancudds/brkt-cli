@@ -421,11 +421,11 @@ def _run_encryptor_instance(aws_svc, encryptor_image_id, snapshot, root_size,
     return instance
 
 
-def _run_snapshotter_instance(aws_svc, image_id):
-    instance = aws_svc.run_instance(image_id)
+def _run_snapshotter_instance(aws_svc, image_id, instance_type):
+    instance = aws_svc.run_instance(image_id, instance_type=instance_type)
     log.info(
-        'Launching instance %s to snapshot root disk for %s',
-        instance.id, image_id)
+        'Launching instance %s (type: %s) to snapshot root disk for %s',
+        instance.id, instance_type, image_id)
     aws_svc.create_tags(
         instance.id,
         name=NAME_SNAPSHOT_CREATOR,
@@ -501,7 +501,7 @@ def _terminate_instance(aws_svc, id, name, terminated_instance_ids):
 
 
 def run(aws_svc, enc_svc_cls, image_id, encryptor_ami,
-        encrypted_ami_name=None):
+        instance_type, encrypted_ami_name=None):
     encryptor_instance = None
     ami = None
     snapshot_id = None
@@ -510,7 +510,8 @@ def run(aws_svc, enc_svc_cls, image_id, encryptor_ami,
     terminated_instance_ids = set()
 
     try:
-        snapshotter_instance = _run_snapshotter_instance(aws_svc, image_id)
+        snapshotter_instance = _run_snapshotter_instance(aws_svc, image_id,
+                                                         instance_type)
         snapshot_id, root_dev, size, vol_type, iops = _snapshot_root_volume(
             aws_svc, snapshotter_instance, image_id
         )
@@ -806,6 +807,13 @@ def main():
         dest='key_name',
         required=True
     )
+   encrypt_ami.add_argument(
+        '--instance-type',
+        metavar='TYPE',
+        help='EC2 Instance Type',
+        dest='instance_type',
+        required=False
+    )
     encrypt_ami.add_argument(
         '--validate-ami',
         dest='no_validate_ami',
@@ -871,6 +879,10 @@ def main():
         except:
             log.exception('Failed to get encryptor AMI.')
             return 1
+            
+   instance_type = values.instance_type
+   if not instance_type:
+      instance_type = 'm3.medium'
 
     session_id = util.make_nonce()
     default_tags = {
@@ -915,6 +927,7 @@ def main():
             enc_svc_cls=service.EncryptorService,
             image_id=values.ami,
             encryptor_ami=encryptor_ami,
+            instance_type=instance_type,
             encrypted_ami_name=values.encrypted_ami_name
         )
         # Print the AMI ID to stdout, in case the caller wants to process
