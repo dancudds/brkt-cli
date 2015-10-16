@@ -881,6 +881,7 @@ def main():
             return 1
             
    instance_type = values.instance_type
+   # TODO: Validate the entered instance type
    if not instance_type:
       instance_type = 'm3.medium'
 
