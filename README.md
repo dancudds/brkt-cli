@@ -14,16 +14,16 @@ more information.
 
 ## Installation
 
-The latest release of **brkt-cli** is 0.9.1.  Use pip to install **brkt-cli** and its dependencies:
+The latest release of **brkt-cli** is 0.9.2.  Use pip to install **brkt-cli** and its dependencies:
 
 ```
-pip install git+https://github.com/brkt/brkt-cli.git@brkt-cli-0.9.1
+$ pip install git+https://github.com/brkt/brkt-cli.git@brkt-cli-0.9.2
 ```
 
 To install the most recent **brkt-cli** code from the tip of the master branch, run
 
 ```
-pip install git+https://github.com/brkt/brkt-cli.git
+$ pip install git+https://github.com/brkt/brkt-cli.git
 ```
 
 The master branch has the latest features and bug fixes, but is not as thoroughly tested as the official release.
@@ -59,7 +59,7 @@ $ export AWS_ACCESS_KEY_ID=<key id>
 
 You'll also need to make sure that your AWS account has the required
 permissions, such as running an instance, describing an image, and
-creating snapshots.  See [iam.json](https://github.com/brkt/brkt-cli/blob/master/iam.json)
+creating snapshots.  See [brkt-cli-iam-permissions.json](https://github.com/brkt/brkt-cli/blob/master/reference_templates/brkt-cli-iam-permissions.json)
 for the complete list of required permissions.
 
 ## Encrypting an AMI

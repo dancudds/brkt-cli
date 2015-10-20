@@ -59,7 +59,7 @@ from boto.ec2.blockdevicemapping import (
 from brkt_cli import service
 from brkt_cli.util import Deadline, make_nonce
 
-VERSION = '0.9.1'
+VERSION = '0.9.2'
 
 # End user-visible terminology.  These are resource names and descriptions
 # that the user will see in his or her EC2 console.
@@ -116,14 +116,20 @@ SLEEP_ENABLED = True
 BRACKET_ENVIRONMENT = "stage"
 ENCRYPTOR_AMIS_URL = "http://solo-brkt-%s-net.s3.amazonaws.com/amis.json"
 
+AMI_NAME_MAX_LENGTH = 128
+
 log = None
 
 
-class SnapshotError(Exception):
+class BracketError(Exception):
     pass
 
 
-class InstanceError(Exception):
+class SnapshotError(BracketError):
+    pass
+
+
+class InstanceError(BracketError):
     pass
 
 
@@ -183,7 +189,7 @@ def _wait_for_encryptor_up(enc_svc, deadline):
             )
             return
         _sleep(5)
-    raise Exception('Unable to contact %s' % enc_svc.hostname)
+    raise BracketError('Unable to contact %s' % enc_svc.hostname)
 
 
 def _get_encryption_progress_message(start_time, percent_complete, now=None):
@@ -197,7 +203,7 @@ def _get_encryption_progress_message(start_time, percent_complete, now=None):
     return msg
 
 
-class EncryptionError(Exception):
+class EncryptionError(BracketError):
     def __init__(self, message):
         super(EncryptionError, self).__init__(message)
         self.console_output_file = None
@@ -269,14 +275,15 @@ def _get_encryptor_ami(region):
     bracket_env = os.getenv('BRACKET_ENVIRONMENT',
                             BRACKET_ENVIRONMENT)
     if not bracket_env:
-        raise Exception('No bracket environment found')
+        raise BracketError('No bracket environment found')
     bucket_url = ENCRYPTOR_AMIS_URL % (bracket_env)
     r = requests.get(bucket_url)
     if r.status_code not in (200, 201):
-        raise Exception('Getting %s gave response: %s', bucket_url, r.text)
+        raise BracketError(
+            'Getting %s gave response: %s' % (bucket_url, r.text))
     ami = r.json().get(region)
     if not ami:
-        raise Exception('No AMI for %s returned.' % region)
+        raise BracketError('No AMI for %s returned.' % region)
     return ami
 
 
@@ -301,9 +308,9 @@ def _wait_for_image(amazon_svc, image_id):
         if image.state == 'available':
             break
         if image.state == 'failed':
-            raise Exception('Image state became failed')
+            raise BracketError('Image state became failed')
     else:
-        raise Exception(
+        raise BracketError(
             'Image failed to become available (%s)' % (image.state,))
 
 
@@ -493,7 +500,8 @@ def _terminate_instance(aws_svc, id, name, terminated_instance_ids):
         log.warn('Could not terminate %s instance: %s', name, e)
 
 
-def run(aws_svc, enc_svc_cls, image_id, encryptor_ami):
+def run(aws_svc, enc_svc_cls, image_id, encryptor_ami,
+        encrypted_ami_name=None):
     encryptor_instance = None
     ami = None
     snapshot_id = None
@@ -637,14 +645,20 @@ def run(aws_svc, enc_svc_cls, image_id, encryptor_ami):
         log.debug('Getting image %s', image_id)
         image = aws_svc.get_image(image_id)
         if image is None:
-            raise Exception("Can't find image %s" % image_id)
+            raise BracketError("Can't find image %s" % image_id)
         encryptor_image = aws_svc.get_image(encryptor_ami)
         if encryptor_image is None:
-            raise Exception("Can't find image %s" % encryptor_ami)
+            raise BracketError("Can't find image %s" % encryptor_ami)
 
         # Register the new AMI.
-        name = _append_suffix(
-            image.name, _get_encrypted_suffix(), max_length=128)
+        if encrypted_ami_name:
+            name = encrypted_ami_name
+        else:
+            name = _append_suffix(
+                image.name,
+                _get_encrypted_suffix(),
+                max_length=AMI_NAME_MAX_LENGTH
+            )
         if image.description:
             suffix = SUFFIX_ENCRYPTED_IMAGE % {'image_id': image_id}
             description = _append_suffix(
@@ -772,6 +786,13 @@ def main():
         help='The AMI that will be encrypted'
     )
     encrypt_ami.add_argument(
+        '--encrypted-ami-name',
+        metavar='NAME',
+        dest='encrypted_ami_name',
+        help='Specify the name of the generated encrypted AMI',
+        required=False
+    )
+    encrypt_ami.add_argument(
         '--encryptor-ami',
         metavar='ID',
         dest='encryptor_ami',
@@ -823,6 +844,15 @@ def main():
     log = logging.getLogger(__name__)
     log.setLevel(log_level)
     service.log.setLevel(log_level)
+
+    if (values.encrypted_ami_name and
+            len(values.encrypted_ami_name) > AMI_NAME_MAX_LENGTH):
+        print(
+            'The encrypted AMI name cannot be longer than '
+            '%d characters' % AMI_NAME_MAX_LENGTH,
+            file=sys.stderr
+        )
+        return 1
 
     # Validate the region.
     regions = [str(r.name) for r in boto.vpc.regions()]
@@ -884,7 +914,8 @@ def main():
             aws_svc=aws_svc,
             enc_svc_cls=service.EncryptorService,
             image_id=values.ami,
-            encryptor_ami=encryptor_ami
+            encryptor_ami=encryptor_ami,
+            encrypted_ami_name=values.encrypted_ami_name
         )
         # Print the AMI ID to stdout, in case the caller wants to process
         # the output.  Log messages go to stderr.
@@ -913,6 +944,16 @@ def main():
             )
         else:
             raise
+    except BracketError as e:
+        if values.verbose:
+            log.exception(e.message)
+        else:
+            log.error(e.message)
+    except KeyboardInterrupt:
+        if values.verbose:
+            log.exception('Interrupted by user')
+        else:
+            log.error('Interrupted by user')
     return 1
 
 if __name__ == '__main__':
