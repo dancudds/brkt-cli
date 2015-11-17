@@ -47,6 +47,7 @@ class EncryptorService(BaseEncryptorService):
     def is_encryptor_up(self):
         try:
             self.get_status()
+            log.debug("Successfully got encryptor status")
             return True
         except Exception as e:
             log.debug("Couldn't get encryptor status: %s", e)

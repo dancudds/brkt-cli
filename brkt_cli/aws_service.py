@@ -37,7 +37,9 @@ class BaseAWSService(object):
                      image_id,
                      security_group_ids=None,
                      instance_type='m3.medium',
-                     block_device_map=None):
+                     block_device_map=None,
+                     user_data=None,
+                     instance_profile_name=None):
         pass
 
     @abc.abstractmethod
@@ -213,11 +215,14 @@ class AWSService(BaseAWSService):
         self.region = region
         self.conn = conn
 
+    @retry_boto(error_code_regexp=r'InvalidParameterValue', max_retries=10)
     def run_instance(self,
                      image_id,
                      security_group_ids=None,
                      instance_type='m3.medium',
-                     block_device_map=None):
+                     block_device_map=None,
+                     user_data=None,
+                     instance_profile_name=None):
         if security_group_ids is None:
             security_group_ids = []
         log.debug('Starting a new instance based on %s', image_id)
@@ -227,12 +232,14 @@ class AWSService(BaseAWSService):
                 key_name=self.key_name,
                 instance_type=instance_type,
                 block_device_map=block_device_map,
-                security_group_ids=security_group_ids
+                security_group_ids=security_group_ids,
+                user_data=user_data,
+                instance_profile_name=instance_profile_name
             )
             return reservation.instances[0]
-        except EC2ResponseError:
+        except EC2ResponseError as e:
             # Log the failed operation, so that the user has context.
-            log.error('Unable to launch instance for %s', image_id)
+            log.debug('Failed attempt to launch instance for %s', image_id)
             raise
 
     @retry_boto(error_code_regexp=r'InvalidInstanceID\.NotFound')
@@ -370,6 +377,29 @@ class AWSService(BaseAWSService):
         ok = self.conn.delete_security_group(group_id=sg_id)
         if not ok:
             raise Exception('Unknown error while deleting security group')
+
+    def create_instance_profile(self, base_name, policy):
+        base_name += '-' + self.session_id
+        profile_name = base_name + '-profile'
+        role_name = base_name + '-role'
+        policy_name = base_name + '-policy'
+        iam_conn = boto.connect_iam()
+        iam_conn.create_instance_profile(profile_name)
+        iam_conn.create_role(role_name)
+        iam_conn.add_role_to_instance_profile(profile_name, role_name)
+        iam_conn.put_role_policy(role_name, policy_name, policy)
+        return profile_name
+
+    def delete_instance_profile(self, profile_name):
+        # Remove '-profile' from the end of the profile name
+        base_name = profile_name[:-8]
+        role_name = base_name + '-role'
+        policy_name = base_name + '-policy'
+        iam_conn = boto.connect_iam()
+        iam_conn.delete_role_policy(role_name, policy_name)
+        iam_conn.remove_role_from_instance_profile(profile_name, role_name)
+        iam_conn.delete_role(role_name)
+        iam_conn.delete_instance_profile(profile_name)
 
     def get_key_pair(self, keyname):
         key_pairs = self.conn.get_all_key_pairs(keynames=[keyname])
